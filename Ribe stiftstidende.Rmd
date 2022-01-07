@@ -1,0 +1,400 @@
+---
+title: "Ribe stiftstidende - En digital analyse"
+author: "Gustav Ølgaard"
+date: "04/1/2022"
+output: html_document
+---
+Før vi kan komme i gang med vores analyse, skal vi først installere og aktivere de relevante pakker.
+```{r, message=FALSE}
+library(tidyverse)
+library(tidytext)
+library(lubridate)
+library(textdata) 
+library(ggwordcloud)
+library(ggplot2)
+library(patchwork)
+library(pdftools)
+library(readr)
+
+#Den sidste pakke vi installere er SENTIA. Da SENTIDA lægger tilgængelig på GITHUB bruger vi følgende kode:
+if(!require("devtools")) install.packages("devtools")
+devtools::install_github("Guscode/Sentida")
+library(Sentida)
+```
+
+Nu har vi installeret vores pakker, men ikke vores data. Derfor henter vi nu vores .csv fil der indeholder dataen om Ribe Stifts-Tidende, og putter den ind i dataframe.
+
+En dataframe er den mest almindelige måde at lagre og håndtere data i R. Dets grundstruktur minder meget om Excels regneark. Dvs. opdelt i rækker og kolonner.  
+
+I løbet af denne analyse, vil der blive brugt en lang række forskellige dataframes. Grundlæggende vil der oprettes en ny dataframe hver gang dataen bliver grundlæggende ændret, eller hvis der bliver tilføjet noget markant.
+```{r}
+stiftstidende <- read_csv2(file = 'Ribe_stifts-tidende_database.csv')
+
+#Her indlæser vi vores database og putter den ind i vores dataframe "stiftstidende".
+```
+
+R definere også hvad kolonnerne i dets dataframes består af. F.eks. kan en data være "numeric" eller "character" (dvs. hhv. tal eller tegn). Hvad R definere kolonnerne som, ændre også hvordan man kan bruge dem. Det første vi må gøre er derfor at redefinere vores "timestamp" kolonne i vores "stiftstidende" dataframe til en dato.
+```{r}
+stiftstidende$timestamp <- dmy(stiftstidende$timestamp)
+
+#Her laver vi vores "timestamp" column om til en date.
+```
+
+Efter vores indledende arbejde kan vi nu begynde på vores analyse.
+
+## Del 1: Sentiment analyse.
+**SENTIDA**
+Da vi gerne vil måle sentiment værdien af vores tekster, og derefter gemme dem til senere brug, skaber vi to nye kolonner i "stiftstidende" dataframen. 
+```{r}
+stiftstidende_sentida <- stiftstidende %>% #Her gemmer vi vores ændringer i en ny dataframe.
+  add_column(Sentida_total = NA) %>% #Her skaber vi kolonnen "sentida_total"
+  add_column(Sentida_mean = NA) #Her skaber vi kolonnen "sentida_mean"
+```
+
+```{r}
+options(scipen = 999)
+
+#Her slår vi vores scientific notation fra. På den måde kan vi se det hele tal.
+```
+
+Nu kan vi få SENTIDA om at lave vores sentimentanalyse:
+```{r}
+stiftstidende_sentida <- stiftstidende_sentida %>%
+  rowwise() %>%
+  mutate(Sentida_total = sentida(fulltext_org, output = "total"))
+#Her laver vi vores sentiment analyse med en total værdi og putter det ind i vores "Sentida_total" column.
+
+
+stiftstidende_sentida <- stiftstidende_sentida %>%
+  rowwise() %>%
+  mutate(Sentida_mean = sentida(fulltext_org, output = "mean"))
+#Her laver vi vores sentiment analyse med en mean værdi og putter det ind i vores "Sentida_mean" column.
+```
+
+Det kan være svært at se præcist hvilken betydning sentimentanalysen har for vores data. En manuel gennemgang bliver hurtigt uoverskuelig. I stedet kan vi plotte vores resultater. 
+```{r}
+Sentida_total_plot <- ggplot(stiftstidende_sentida, aes(x=timestamp, y=Sentida_total)) +
+  geom_point(aes(col=Sentida_mean)) +
+  geom_smooth(se=F, span = 0.5, color="red") +
+  scale_x_date(date_labels="%b",date_breaks  ="1 month")
+
+Sentida_mean_plot <- ggplot(stiftstidende_sentida, aes(x=timestamp, y=Sentida_mean)) +
+  geom_point(aes(col=Sentida_total)) +
+  geom_smooth(se=F, span = 0.5, color="red") +
+  scale_x_date(date_labels="%b",date_breaks  ="1 month")
+
+Sentida_mean_plot
+Sentida_total_plot
+
+#Her plotter vi vores sentida data. Den første graf viser sentida_mean værdien, hvor farven er dets mean, mens den anden graf viser det modsatte. Samtidigt er der tilføjet en median linje, så den generelle trend er nemmere at aflæse.
+```
+
+**Antal artikler skrevet pr. måned**
+Som det kan ses i de ovenstående grafer, bliver sproget først køligere før det bliver mere neutralt igen (omkring de 0.4 points). Men det ligner til forveksling at der bliver skrevet færre artikler om ham i nogle månder sammenlignet med andre. Lad os se om dette passer.
+
+Da vi ikke nødvendigvis har lyst til at se mængden af artikler der bliver skrevet dag for dag, men i stedet måned for måned, skaber vi en ny kolonne. Den nye kolonne tager dets værdi fra vores "timestamp". Derved får alle artikler fra januar værdien 1 i kolonnen "m", februar får 2 osv.
+```{r}
+stiftstidende_sentida %>% 
+  mutate(m = month(timestamp)) -> stiftstidende_sentida 
+```
+
+Vi kan nu plotte vores antallet af artikler skrevet både pr. dag og pr. måned. 
+```{r}
+stiftstidende_sentida %>% 
+  count(m) #her tæller vi antallet af artikler skrevet pr. måned.
+
+stiftstidende_sentida %>% 
+  count(timestamp) %>%
+  ggplot(aes(x = timestamp,y = n)) +
+  geom_line(color = "deepskyblue",size=1) +
+  labs(x="Dato", y="Hvor mange artikler bliver der skrevet") +
+  scale_x_date(date_labels="%b",date_breaks  ="1 month")
+#Denne kodeblok plotter antallet artikler pr. dag, og bruger derfor vores "timestamp" kolonne.
+
+stiftstidende_sentida %>% 
+  count(m) %>%
+  ggplot(aes(x = m,y = n)) +
+  geom_bar(fill = "deepskyblue",stat = "identity",position = "dodge")+
+  labs(x="Måned", y="Hvor mange artikler bliver der skrevet")
+#Denne kodeblok plotter antallet artikler pr. måned, og bruger derfor vores "m" kolonne.
+```
+Vi kan nu observere at der bliver skrevet færre artikler om ham i januar, maj og juli måned. Man skal dog bære lettere varsom med vores resultat da den kun viser antallet artikler der nævner Hanssen. Den tager altså ikke størrelsen af artikler in mente.
+
+**Er artikler der nævner de radikale oftest negative eller positive?**
+Som det kan ses i undersøgelsens traditionelle avisundersøgelse, er der ofte referencer til Hanssens radikale forbindelser i negative artikler. Lad os se om der også er en sammenhæng i Ribe Stifts-Tidende. Dette kan vi gøre ved at se hvor ofte ordne "radikal", "scavenius" eller "Zahle" fremgår i artikler med en sentiment værdi under en hvis grænse. Grænsen er her sat til 0.3
+
+Først starter vi med at unneste vores artikler. Dvs. splitte dem op i enkelte ord.
+```{r}
+stiftstidende_sentida_tidy <- stiftstidende_sentida %>% 
+  unnest_tokens(word, fulltext_org)
+```
+
+Da artiklerne ikke nødvendigvis kun bruger ordet radikal, men også radikales, radikalerne osv., er vi nødt til at finde alle versioner af vores udvalgte ord. Dette kan vi gøre med en regex funktion. Men da det ikke altid er muligt at bruge samme regexfunktioner, ændre vi alle vores resultater til det samme ord. Dvs. alle versioner af "radikal" bliver ændret til "radikal" i teksten.
+
+Herefter filtrerer dem så vi kun har vores udvalgte ord tilbage i vores nye dataframe.
+```{r}
+stiftstidende_sentida_tidy_radikal <- stiftstidende_sentida_tidy %>% 
+  mutate(word = str_replace(word, regex("[zZ]ahle*"), "zahle")) %>% #Her bruger vi regex til at finde vores udvalgte ord og ændre dem så de er ens.
+  mutate(word = str_replace(word, regex("radikal[a-zA-Z]*"), "radikal")) %>% 
+  mutate(word = str_replace(word, regex("[sS]cavenius*"), "scavenius")) %>% 
+  filter(str_detect(word, regex("zahle|radikal|scavenius"))) #Her filtrere vi vores udvalgte ord.
+```
+
+Da vi gerne vil undersøge om negative artikler indeholder vores udvalgte ord, er vi nødt til skabe en ny kolonne der viser om artikler er negativ.
+```{r}
+stiftstidende_sentida_tidy_radikal <- stiftstidende_sentida_tidy_radikal %>% 
+    add_column(negativ = NA) #Her tilføjer vi kolonnen "negativ"
+
+stiftstidende_sentida_tidy_radikal <- stiftstidende_sentida_tidy_radikal %>% 
+  mutate(negativ = ifelse(Sentida_mean < 0.3, "TRUE", "FALSE")) #Her giver vi vores ovenstående kolonne værdien "TRUE" eller "FALSE" alt efter om deres sentida_mean værdi er under 0.3.
+```
+
+Nu visualisere vi vores ovenstående resultat.
+```{r}
+stiftstidende_sentida_tidy_radikal %>% 
+  count(negativ) %>%
+  ggplot(aes(x = negativ,y = n)) +
+  geom_bar(fill = "deepskyblue",stat = "identity",position = "dodge")+
+  labs(y="Er artikler der nævner 'Zahle', 'Scavenius' eller 'radikal' negative?")
+```
+
+**Hvor mange negative artikler nævner de radikale?**
+Det er altså sandt at hovedparten af artikler der nævner et af vores tre ord er negative. Men hvad med når det bliver set i sammenhæng med alle de øvrige negative artikler? Sagt anderledes: artikler der nævner vores udvalgte ord er oftest negative, men nævner negative artikler ofte vores udvalgte ord?
+
+Vi starter med først at vi starter med at gøre det noget der ligner meget det samme som i det ovenstående kode: Vi finder alle versionerne af ordne "radikal", "zahle", "scavenius" og "regering"*, herefter giver vi værdien TRUE / FALSE i en ny kolonne radikal. Vi finder kort sagt alle artikler der referer til de radikale eller deres regering.
+
+* Dette ord bliver kun talt med i perioden før påskekrisen.
+```{r}
+stiftstidende_sentida_radikal <- stiftstidende_sentida %>% 
+  mutate(radikal = ifelse(str_detect(fulltext_org, regex("[zZ]ahle[a-zA-ZøØåÅ]*|[rR]adikal[a-zA-ZøØåÅ]*|[sS]cavenius[a-zA-ZøØåÅ]*")), "TRUE", ifelse(m < 4 & str_detect(fulltext_org, regex("[rR]egering[a-zA-ZøØåÅ]*")),"TRUE", "FALSE")))
+```
+
+Herefter indeler vi vores artikler ind i "positive", "neutrale", "negative", "meget negative" alt efter deres sentida_mean score. Artikler bliver indelt således: Positiv artikler har en sentida_mean score over 0.5, neutrale har en score mellem 0.5 og 0.3, negative artikler har en score mellem 0.3 og 0.1, meget negative artikler har en score under 0.1
+```{r}
+stiftstidende_sentida_radikal <- stiftstidende_sentida_radikal %>% 
+  mutate(negativ = ifelse(Sentida_mean > 0.5, "POSITIV", ifelse(Sentida_mean > 0.3, "NEUTRAL", ifelse(Sentida_mean > 0.1, "NEGATIV","MEGET NEGATIV"))))
+```
+
+Nu filtrerer vi de positive og neutrale kilder fra, så vi kun har vores negative artikler tilbage. Med det gjort, plotter vi hvor mange negative artikler der nævner vores udvalgte ord. For at undersøge om ordne fremgår oftere i meget negative artikler, plotter vi også dette. 
+
+Hvis artiklerne næver vores udvalgte ord er de TRUE. Hvis de ikke nævner dem er de FALSE.
+```{r}
+stiftstidende_sentida_radikal_negativ <- stiftstidende_sentida_radikal %>% 
+  filter(negativ == "NEGATIV"| negativ == "MEGET NEGATIV")
+
+# Her plotter vi alle de negative artikler.
+stiftstidende_sentida_radikal_negativ %>% 
+  count(radikal) %>% 
+  ggplot(aes(x = radikal,y = n)) +
+  geom_bar(fill = "deepskyblue",stat = "identity",position = "dodge")+
+  labs(y="Antal negative artikler med relation til de radikale")
+
+# Her plotter vi kun de artikler der er negative (dvs. med en sentida_mean score mellem 0.3 og 0.1)
+stiftstidende_sentida_radikal_negativ %>% 
+  filter(negativ == "NEGATIV") %>% 
+  count(radikal) %>%
+  ggplot(aes(x = radikal,y = n)) +
+  geom_bar(fill = "deepskyblue",stat = "identity",position = "dodge")+
+  labs(y="Antal lidt negative artikler med en relation til de radikale")
+
+# Her plotter vi kun de artikler der er meget negative (dvs. med en sentida_mean score under 0.1)
+stiftstidende_sentida_radikal_negativ %>% 
+  filter(negativ == "MEGET NEGATIV") %>% 
+  count(radikal) %>% 
+  ggplot(aes(x = radikal,y = n)) +
+  geom_bar(fill = "deepskyblue",stat = "identity",position = "dodge")+
+  labs(y="Antal meget negative artikler med en relation til de radikale")
+```
+Det er altså tydeligt at se at en stor del af de negative artikler i Ribe Stifts-Tidende på en eller anden måde nævner de radikale eller lignende. Især kan det bemærkes at jo mere negative de er, jo større chance er der for at de nævner noget om de radikale. 
+
+**Hvor mange negative artikler nævner grænsestriden?**
+Men hvordan er dette sammenlignet med negative artikler om grænsestriden? Til dette finder vi alle artikler der nævner "grænsen", "flensborg" eller "clausenlinjen". Ligesom tidligere bliver alle versioner af disse ord fundet. 
+```{r}
+#Her finder vi alle vores udvalgte ord. Hvis en artikel indeholder dem bliver de markeret med "TRUE" i en nye kolonne kalder "grænsen". Herefter skabes en ny dataframe.
+stiftstidende_sentida_graense <- stiftstidende_sentida_radikal %>% 
+  mutate(grænsen = ifelse(str_detect(fulltext_org, regex("[gG]rænse[a-zA-ZøØåÅ]*|[fF]ensborg[a-zA-ZøØåÅ]*|[cC]lausen.*\\s*\\w*\\s*linje[a-zA-ZøØåÅ]*")), "TRUE", "FALSE"))
+
+#Her plotter vi antallet af artikler der nævner noget om grænsen. 
+stiftstidende_sentida_graense %>% 
+  filter(negativ == "NEGATIV"| negativ == "MEGET NEGATIV") %>% 
+  count(grænsen) %>% 
+  ggplot(aes(x = grænsen,y = n)) +
+  geom_bar(fill = "deepskyblue",stat = "identity",position = "dodge")+
+  labs(y="Antal negative artikler indeholder en relation til grænsestriden")
+```
+Som det kan ses af den ovenstående graf, er det kun ca. 1/3 af alle negtaive artikler der nævner noget om grænsen.
+
+**Sentiment fordelingen**
+Vi kan nu også lave en mere klar fordeling af artiklerne. Hvor mange er meget negative, negative, neutrale og positive:
+```{r}
+stiftstidende_sentida_radikal %>% 
+  count(negativ) %>% 
+  ggplot(aes(x = negativ,y = n)) +
+  geom_bar(fill = "deepskyblue",stat = "identity",position = "dodge")+
+  labs(y="Hvordan er fordelingen af sentiment")
+```
+Som det kan observeres er hovedparten af alle artikler skreven enten negative eller meget negative.
+
+## Del 2: Text mining via "term frequence".
+Gennem term frequences can vi undersøge hvor ofte enkelte ord fremgår i vores datasæt. Men dette er ikke altid interressant i sig selv. Derfor vil der her undersøges hvilke ord der er unikke for hver måned. Altså hvad karakterisere artiklerne om H.P. Hanssen i datasættet fra Januar til Juli.
+
+Vi starter med at notere hvilken måned hver artikel er udgivet. Dette gør vi med samme metode som tidligere.
+```{r}
+stiftstidende_df <- stiftstidende %>% 
+  mutate(m = month(timestamp)) 
+```
+
+Herefter indeler vi datasættet ord for ord. Dette datasæt vil være grundstenen for både denne og næste del af analysen.
+```{r}
+stiftstidende_tidy <- stiftstidende_df %>% 
+  unnest_tokens(word, fulltext_org)
+```
+
+Fordi vi allerede har noteret måneden artiklerne er udgivet i, samt opdelt dem pr. ord, kan vi nu combinere de to delelementer. Vi kan altså nu tælle hvor ofte hvert ord fremgår i hver måned.
+```{r}
+stiftstidende_tidy %>% 
+  count(m, word, sort = TRUE)
+```
+Ikke overraskende er modalpartikler, dvs. småord der ikke i sig selv har nogen betydning, de mest hyppige. Disse ord er irrelevante for os, da vi jo vil undersøge hvad der karakterisere hver måned. Modalpartikler fremfår hver måned, og netop dette kan vi udnytte ved at sammenligne ordnes frekvens.
+
+Det første vi er nødt til at gøre er derfor at tælle hvor mange ord der er skrevet hver måned i vores datasæt:
+```{r}
+stiftstidende_tidy %>% 
+  count(m, word, sort = TRUE) %>% 
+  group_by(m) %>% 
+  summarise(total = sum(n)) -> total_words
+
+total_words
+```
+
+Dette antal tilføjer vi nu til en ny dataframe.
+```{r}
+stiftstidende_counts <- stiftstidende_tidy %>%
+  count(m, word, sort = TRUE) %>% 
+  left_join(total_words, by = "m") 
+```
+
+Nu kan vi begynde at undersøge ordnes frekvens. Det vi gør i denne kode blok er kort sagt at undersøge hvor ofte ordne fremgår i sammenligning med det totale antal ord skrevet den givne måned. Bliver ordet nævnt i alle artikler i periode, er dets frekvens så høj at den slet ikke vil fremgå, mens de mere unikke ord for den givne måned vil stå frem.
+```{r}
+stiftstidende_tfidf <- stiftstidende_counts %>% 
+  bind_tf_idf(word, m, n)
+
+# Som eksempel plotter vi den 4 måneds ord baseret på dets ordfrekvens.
+stiftstidende_tfidf %>%
+  arrange(desc(tf_idf)) %>% 
+  filter(m == 4)
+```
+
+**Ordfrekvensen gennem wordcloud**
+Denne liste kan dog være svær at finde hoved og hale i. Derfor kan vi gøre brug af wordclouds! Her vil vi opstille de seks mest karkteriske ord pr. måned:
+```{r}
+stiftstidende_tfidf %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(m) %>% 
+  top_n(6) %>% 
+  ungroup %>%
+  ggplot(aes(label = word, size = tf_idf, color = tf_idf)) +
+  geom_text_wordcloud_area() +
+  scale_size_area(max_size = 4.5) +
+  theme_minimal() +
+  facet_wrap(~m, ncol = 3, scales = "free") +
+  scale_color_gradient(low = "darkgoldenrod2", high = "darkgoldenrod4") +
+  labs(
+      title = "Ribestiftstidende: most important words pr. month",
+       subtitle = "Importance determined by term frequency (tf) - inversed document frequency(idf)",
+      caption = "Data from Mediestream")
+```
+
+**Et nærmere blik på interessante ord**
+Nu ved vi hvilke ord der er unikke hver måned. Men det kan være svært at vide præcist hvordan artiklerne bruger ordne. Derfor er vi nød til at gå dybere ned i teksten.
+
+Som eksempel kan vi prøve at se nærmere på ordet "folkepartiet" i juli. Ved at gøre følgende kan vi se hele artiklen hvor ordet fremgår i, hvad dets overskrift er samt hvilken dag den præcist blev udgivet:
+```{r}
+stiftstidende_df %>% 
+  filter(m == 7) %>% 
+  filter(str_detect(fulltext_org, regex("folkepartiet", ignore_case = T))) %>% 
+  select(fulltext_org, timestamp, rubrik)
+```
+
+## Del 3: Text mining via tokenize ord
+I denne del af analysen vil vi prøve at undersøge hvilket ord der fremgår oftest i artikler hvor H.P. Hanssen er nævnt. Denne del adskiller sig fra den ovenstående, da vi ikke prøver at undersøge hvilket ord der er unikke for hver måned.
+
+Vi starter med at importere vores stop-words liste. Denne liste indeholder undelukkende nogle af de mest almindelige danske ord. Denne liste er fundet på nettet, men er blevet let modificeret til at tilpasse dataen. F.eks. er alle å'er lavet om til dobbelt a'er.
+```{r}
+stop_words <- read_csv2(file = 'stop_words_DK.csv')
+```
+
+Disse ord giver i sig selv ikke nogen værdi til vores analyse, og er naturligvis de ord der er brugt oftest i løbet af artiklerne. Målet er derfor at fjerne disse ord fra vores tokenized dataframe. Dvs. dataframen hvor artiklerne er sepereret for hvert ord.
+
+Det kan vi gøre ved at bruge fuctionen "anti_join".
+```{r}
+stiftstidende_tidy_stopwords <- stiftstidende_tidy %>% 
+  anti_join(stop_words)
+```
+
+Nu kan vi tælle de mest brugte ord.
+```{r}
+# De mest brugte ord.
+stiftstidende_tidy_stopwords %>% 
+  count(word, sort = TRUE)
+
+# De mest brugte ord i april måned.
+stiftstidende_tidy_stopwords %>% 
+  filter(m == 4) %>% 
+  count(word, sort = TRUE)
+```
+
+Her kan vi altså meget hurtig se at Hanssen ofte bliver nævnt i forbindelse til Flensborg. En anden interessant ting der også forekommer interressant er ordet "radikale". Hanssen var ikke selv radikal, men var derimod del af den radikale regering i perioden. Lad os undersøge hvornår disse to ord bliver brugt.  
+```{r}
+stiftstidende_tidy_stopwords %>% 
+  mutate(word = str_replace(word, regex("\\w*flensborg\\w*"), "flensborg")) %>% 
+  mutate(word = str_replace(word, regex("radikal[a-zA-Z]*"), "radikal")) %>%
+  mutate(word = str_replace(word, regex("\\w*internationalisering[a-zA-Z]*"), "internationalisering")) %>%
+  filter(str_detect(word, regex("flensborg|radikal|internationalisering"))) %>% 
+  count(m, word, sort = TRUE) %>% 
+  ggplot(aes(x = m,y = n)) +
+  geom_bar(aes(fill = word),stat = "identity",position = "dodge") +
+  labs(x="Måned", y="Hvor ofte ordet bliver nævnt") +
+
+stiftstidende_tidy_stopwords %>% 
+  mutate(word = str_replace(word, regex("\\w*flensborg\\w*"), "flensborg")) %>% 
+  mutate(word = str_replace(word, regex("radikal[a-zA-Z]*\\b"), "radikal")) %>%
+  mutate(word = str_replace(word, regex("\\w*internationalisering\\w*"), "internationalisering")) %>%
+  filter(str_detect(word, regex("flensborg|radikal|internationalisering"))) %>% 
+  count(timestamp, word, sort = TRUE) %>% 
+  ggplot(aes(x = timestamp,y = n)) +
+  geom_line(aes(color = word),size=1) +
+  labs(x="Dato", y="Hvor ofte ordet bliver nævnt") +
+  scale_x_date(date_labels="%b",date_breaks  ="1 month")
+```
+
+Flensborg bliver især nævnt omkring afstemmningerne af første og anden zone, hvilket ikke er overraskende. Derimod ser vi også et hop i midt april samt slut maj og juni. Samtidigt bliver der ordet "radikale" stort set ikke nævnt under den første afstemning, men ser et forøget efter anden afstemning. Med alt sandsynlighed er dette både en kombi af påskekrisen, folketingsvalget og tabet af anden zone. Der sker dog også et stort hop i juli, men ved et nærmere undersøgelse viser at de stammer fra en enkelt artikel. 
+
+En nærmere undersøgelse af materielt kan både gøres manuelt, som med den ovenstående artiklen i juli, men det kan også gøres digitalt ved brugen af N-grams
+
+## Del 4: N-grams
+N-grams betyder kort sagt at vi udvælger et ord, f.eks. Flensborg, og ser hvilke ord der der optræder på hver deres side.
+
+Først stater vi med at indele vores artikler i blokke af 9 ord. Hver blok indeholder ikke 9 nye ord hver gang, men udskifter det første ord ud med det næste i rækken. Vi får altså en progressiv gennemgang af hver artikel ord for ord, men sat i kontekst af de 8 øvrige ord der kom før. 
+```{r}
+stiftstidende_df %>% 
+  unnest_tokens(ngram, fulltext_org, token = 'ngrams', n = 9) -> nagram_stiftstidende
+```
+
+Nu splitter vi disse 9 ords blokke ind i 9 seperate kolonner.
+```{r}
+nagram_stiftstidende_sep <- nagram_stiftstidende %>% 
+  separate(ngram, c('word1', 'word2', 'word3', 'word4', 'word5', 'word6', 'word7', 'word8', 'word9'), sep = ' ')
+```
+
+Nu kan vi se hvordan ord fremgår i konteskt. Lad os se på Flensborg som eksempel.
+```{r}
+nagram_stiftstidende_sep_sort_flensborg <- nagram_stiftstidende_sep %>% 
+  filter(word5 == 'flensborg') %>% 
+  count(word1, word2, word3, word4, word5, word6, word7, word8, word9, sort = TRUE)
+
+nagram_stiftstidende_sep_sort_flensborg
+```
+
+Dette afslutter den digitale analyse af Ribe Stifts-Tidende. Som nævnt i undersøgelsens diskussionsafsnit (afleveret som PDF til AU), var undersøgelsen plaget af eksempelvis OCR problemmer. Man bør således tage dets resultater med et gram salt.
